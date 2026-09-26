@@ -181,37 +181,61 @@ def evaluate_response(category, answer):
 
 # Print the evaluation results
 
-def evaluate_results(results):
+def evaluate_results(results, test_model_list):
 
     category_counts = {}
 
-    for test in results:
+    for test_result in results:
 
-        category = test["category"]
+        category = test_result["category"]
 
         if category not in category_counts:
-            category_counts[category] = {
-                "passed": 0,
-                "failed": 0
-            }
+            for model in test_model_list:
+                category_counts[category] = {
+                    f"{model}_passed": 0,
+                    f"{model}_failed": 0,
+                    f"{model}_total": 0
+                }
 
-        if test["passed"]:
-            category_counts[category]["passed"] += 1
-        else:
-            category_counts[category]["failed"] += 1
+        for model in test_model_list:
+            if test_result[f"{model}_passed"]:
+                category_counts[category][f"{model}_passed"] += 1
+            else:
+                category_counts[category][f"{model}_failed"] += 1
+            category_counts[category][f"{model}_total"] += 1
 
 
     for category, counts in category_counts.items():
 
-        total = counts["passed"] + counts["failed"]
+        # total = counts["passed"] + counts["failed"]
 
-        print(
-            f"{category}: "
-            f"{counts['passed']}/"
-            f"{total} Passed"
-        )
+        for model in test_model_list:   
+            print(
+                f"{category}: "
+                f"{model}: "
+                f"{counts[f'{model}_passed']}/"
+                f"{counts[f'{model}_total']} Passed"
+            )
 
-# main evaluation framework
+# Model response function
+
+def model_response (model, question):
+
+    response = ollama.chat(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": question
+            }
+        ]
+    )
+
+    answer = response["message"]["content"]
+
+    return answer
+
+# main evaluation loop & framework
 
 total_tests = 0
 passed_tests = 0
@@ -221,50 +245,50 @@ with open("dataset.json") as f:
 
 results = []
 
+# List of models to be tested
+test_model_list = ["qwen2.5:3b"]
+
 for item in dataset:
 
     print(f"Running test: {item['id']}")
-    response = ollama.chat(
-        model="qwen2.5:3b",
-        messages=[
-            {
-                "role": "user",
-                "content": item["question"]
-            }
-        ]
-    )
 
-    answer = response["message"]["content"]
 
-     # ---------------------------------------
-    # 4. Evaluate the response
-    # ---------------------------------------
-
-    passed = evaluate_response(
-        item["category"],
-        answer
-    )
-
-    evaluation = evaluate_response(
-        item["category"],
-        answer
-    )
-
-    total_tests += 1
-
-    if evaluation['passed']:
-        passed_tests += 1
-    
-
-    results.append({
+    test_case_result = {
         "id": item["id"],
         "category": item["category"],
         "question": item["question"],
-        "expected": item["expected"],
-        "answer": answer,
-        "passed": evaluation["passed"],
-        "reason": evaluation["reason"]
-    })
+        "expected": item["expected"]
+    }
+
+
+
+    for model in test_model_list:
+        answer = model_response("qwen2.5:3b", item["question"]) 
+
+        # ---------------------------------------
+        # 4. Evaluate the response
+        # ---------------------------------------
+
+        passed = evaluate_response(
+            item["category"],
+            answer
+        )
+
+        evaluation = evaluate_response(
+            item["category"],
+            answer
+        )
+
+        total_tests += 1
+
+        if evaluation['passed']:
+            passed_tests += 1
+
+        test_case_result[f"{model}_answer"] = answer
+        test_case_result[f"{model}_passed"] = evaluation["passed"]
+        test_case_result[f"{model}_reason"] = evaluation["reason"]
+
+    results.append(test_case_result)
 
 with open("results.json", "w") as f:
     json.dump(results, f, indent=2)
@@ -280,4 +304,4 @@ print(f"Pass rate   : {(passed_tests / total_tests) * 100:.1f}%")
 
 print("Evaluation run completed.")
 
-evaluate_results(results)
+evaluate_results(results, test_model_list)
